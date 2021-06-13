@@ -1,5 +1,6 @@
 '''
 在host1上修改，合并两个接收端，旨在区分ack和数据报
+host2作为服务端
 '''
 import threading
 import pickle
@@ -8,12 +9,11 @@ from Utils2 import PDU, Config, CRC, RecvLogConfig
 import os
 import signal
 import random
+import time
 
 host2_config = Config()  # 读取配置文件
 event = threading.Event()  # event flag
 lock = threading.RLock()  # 递归锁
-host2_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)  # 客户端socket
-host2_socket.bind(host2_config.host2_addr)  # 绑定发送端口
 host2_send_file = open(host2_config.send_file, 'rb')  # 以二进制方式打开待发送的文件，测试发送一份pdf文件
 host2_send_log = open(host2_config.send_log, 'w')  # 创建日志
 host2_recv_log_config = RecvLogConfig()  # 读取日志配置
@@ -104,79 +104,85 @@ def receiver():
 
     global host2_recv_log_config
     global host2_recv_file
+    last_time = time.time()
     recv_log = open(host2_config.recv_log, 'w')  # 创建日志
     while True:
+        if time.time() - last_time > host2_config.timeout:
+            if host2_config.acked_num - 1 == host2_config.pdu_sum:
+                pass
+            else:
+                threading.Thread(name='resend_pdu', target=resend).start()
+                last_time = time.time()
         # host2_socket.settimeout(host2_config.timeout)  # 设置阻塞接受时间
         try:
             pdu, host1_addr = host2_socket.recvfrom(host2_config.data_size * 2)  # 接受数据帧
-            # pdu数据类型bytes
-        except:
-            print("[ERROR] receive thread!!!")
-            continue
-        if should_lost():  # 数据帧丢失
-            continue
-        # 如果未丢失，判断是数据帧还是ack
-        else:  # 未丢失
             pdu = pickle.loads(pdu)  # pickle可以读取dict和list的数据
+        except ConnectionResetError:
+            continue
+        except BlockingIOError:
+            continue
 
-            if pdu['is_ack'] == -1:  # 如果是数据帧
-                host2_recv_log_config.num_to_recv += 1  # 接受次数+1
-                # pdu = pickle.loads(pdu)  # 解析数据
-                host2_recv_log_config.pdu_recv = pdu['pdu_to_send']  # 获取接受的pdu序号
-                if CRC().calculate(pdu['data']) != int(pdu['checksum']):  # 数据出现错误
-                    host2_recv_log_config.status = 'DataErr'
+        if pdu['is_ack'] == -1:  # 如果是数据帧
+            # if should_lost():  # 数据帧丢失
+                    # continue
+            # 如果未丢失，判断是数据帧还是ack
+            host2_recv_log_config.num_to_recv += 1  # 接受次数+1
+            # pdu = pickle.loads(pdu)  # 解析数据
+            host2_recv_log_config.pdu_recv = pdu['pdu_to_send']  # 获取接受的pdu序号
+            if CRC().calculate(pdu['data']) != int(pdu['checksum']):  # 数据出现错误
+                host2_recv_log_config.status = 'DataErr'
+                log = host2_recv_log_config.get_log()  # 获取日志
+                print(log)
+            else:  # 数据未出错
+                if host2_recv_log_config.pdu_exp != pdu['pdu_to_send']:  # 序号错误
+                    host2_recv_log_config.status = 'NoErr'
                     log = host2_recv_log_config.get_log()  # 获取日志
                     print(log)
-                else:  # 数据未出错
-                    if host2_recv_log_config.pdu_exp != pdu['pdu_to_send']:  # 序号错误
-                        host2_recv_log_config.status = 'NoErr'
-                        log = host2_recv_log_config.get_log()  # 获取日志
-                        print(log)
-                    else:  # 正确接收
-                        host2_recv_log_config.status = 'OK'
-                        log = host2_recv_log_config.get_log()  # 获取日志
-                        print(log)
-                        # ack = host2_recv_log_config.pdu_exp  # 获取应该返回的ack
-                        ack = PDU(is_ack=-2,
-                                  num_to_send=-1,
-                                  pdu_to_send=-1,
-                                  status="OK",
-                                  acked_num=-1,
-                                  data=host2_recv_log_config.pdu_exp,
-                                  checksum=-1)
-                        threading.Thread(target=send_ack,
-                                         args=(pickle.dumps(ack.get_pdu()), host1_addr)).start()   # 返回ack
-                        if len(pdu['data']) == 0:  # 收到空数据，文件已发送完毕
-                            host2_send_file.close()
-                            print('receive complete')
-                            recv_log.write('receive complete\n')
-                            recv_log.close()
-                            host2_recv_file.close()
-                            return
-                        host2_recv_file.write(pdu['data'])  # 将收到的数据写入文件
-                        host2_recv_log_config.pdu_exp += 1
-                recv_log.write(log + '\n')  # 写入日志
+                else:  # 正确接收
+                    host2_recv_log_config.status = 'OK'
+                    log = host2_recv_log_config.get_log()  # 获取日志
+                    print(log)
+                    # ack = host2_recv_log_config.pdu_exp  # 获取应该返回的ack
+                    ack = PDU(is_ack=-2,
+                                num_to_send=-1,
+                                pdu_to_send=-1,
+                                status="OK",
+                                acked_num=-1,
+                                data=host2_recv_log_config.pdu_exp,
+                                checksum=-1)
+                    threading.Thread(target=send_ack,
+                                        args=(pickle.dumps(ack.get_pdu()), host1_addr)).start()   # 返回ack
+                    if len(pdu['data']) == 0:  # 收到空数据，文件已发送完毕
+                        host2_send_file.close()
+                        print('receive complete')
+                        recv_log.write('receive complete\n')
+                        recv_log.close()
+                        host2_recv_file.close()
+                        return
+                    host2_recv_file.write(pdu['data'])  # 将收到的数据写入文件
+                    host2_recv_log_config.pdu_exp += 1
+            recv_log.write(log + '\n')  # 写入日志
 
-            elif pdu['is_ack'] == -2:  # 是ack帧则接受
-
-                try:
-                    # ack = host1_socket.recvfrom(1024)[0]
-                    ack = pdu['data']
-                except socket.timeout:  # 超时重发
-                    print("resend")
-                    threading.Thread(name='resend', target=resend).start()
-                    continue
-                # ack = pickle.loads(ack)
-                lock.acquire()
-                host2_config.acked_num = ack  # 修改已收到的ack
-                print('receive ack: ', ack)
-                if host2_config.acked_num == host2_config.pdu_sum + 1:  # 所有ack接受完毕，结束进程
-                    print('send complete')
-                    host2_send_log.write('send complete\n')
-                    host2_send_file.close()
-                    host2_send_log.close()
-                    os.kill(os.getpid(), signal.SIGTERM)
-                lock.release()
+        elif pdu['is_ack'] == -2:  # 是ack帧则接受
+            last_time = time.time()
+            try:
+                # ack = host1_socket.recvfrom(1024)[0]
+                ack = pdu['data']
+            except socket.timeout:  # 超时重发
+                print("resend")
+                threading.Thread(name='resend', target=resend).start()
+                continue
+            # ack = pickle.loads(ack)
+            lock.acquire()
+            host2_config.acked_num = ack  # 修改已收到的ack
+            print('receive ack: ', ack)
+            if host2_config.acked_num == host2_config.pdu_sum + 1:  # 所有ack接受完毕，结束进程
+                print('send complete')
+                host2_send_log.write('send complete\n')
+                host2_send_file.close()
+                host2_send_log.close()
+                os.kill(os.getpid(), signal.SIGTERM)
+            lock.release()
 
 
 # 返回ack
@@ -186,12 +192,32 @@ def send_ack(ack, recv_addr):
 
 
 if __name__ == '__main__':
-    fill_pdu_q = threading.Thread(name='fill_pud_q', target=fill_pdu_q)
-    send_pdu = threading.Thread(name='send_pdu', target=send_pdu)
-    # receiver_ack = threading.Thread(name='receive_ack', target=receive_ack)
-    receiver_thread = threading.Thread(name='receiver', target=receiver)
 
-    fill_pdu_q.start()
-    send_pdu.start()
-    # receiver_ack.start()
+    host2_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)  # 客户端socket
+
+    # 阻塞模式
+    host2_socket.setblocking(1)
+    host2_socket.settimeout(10)
+    host2_socket.bind(host2_config.host2_addr)  # 服务器绑定发送端的端口
+    print("绑定成功")
+
+    receiver_thread = threading.Thread(name='receiver', target=receiver)
     receiver_thread.start()
+
+    print("0: 解除绑定 1: 传送文件")
+    cmd = input("输入指令:")
+    print(cmd)
+    if cmd == "0":
+        # 解除socket绑定
+        host2_socket.close()
+
+    elif cmd == "1":
+        fill_pdu_q = threading.Thread(name='fill_pud_q', target=fill_pdu_q)
+        send_pdu = threading.Thread(name='send_pdu', target=send_pdu)
+        # receiver_ack = threading.Thread(name='receive_ack', target=receive_ack)
+        # receiver_thread = threading.Thread(name='receiver', target=receiver)
+
+        fill_pdu_q.start()
+        send_pdu.start()
+        # receiver_ack.start()
+

@@ -36,7 +36,8 @@ class PDU:
 # 一些全局需要使用变量，封装到这个配置文件里
 class Config:
     def __init__(self):
-        self.ip = socket.gethostbyname(socket.gethostname())    # ip地址
+        # self.ip = socket.gethostbyname(socket.gethostname())    # ip地址
+        self.ip = "127.0.0.1"
         self.host1_port = 41123                                 # host1的端口
         self.host1_addr = (self.ip, self.host1_port)            # host1的地址
         self.host2_port = 41897                                 # host2的端口
@@ -47,7 +48,7 @@ class Config:
         self.lost_rate = 100    # 丢失率
         self.sw_size = 8        # 发送窗口大小
         self.init_seq_num = 1   # 起始序号
-        self.timeout = 1        # 超时时间
+        self.timeout = 1      # 超时时间
 
         self.pdu_to_send = self.init_seq_num        # 当前发送的pdu序号
         self.num_to_send = self.init_seq_num        # 当前发送的次数

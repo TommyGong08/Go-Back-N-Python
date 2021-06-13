@@ -36,7 +36,8 @@ class PDU:
 # 一些全局需要使用变量，封装到这个配置文件里
 class Config:
     def __init__(self):
-        self.ip = socket.gethostbyname(socket.gethostname())     # ip地址
+        # self.ip = socket.gethostbyname(socket.gethostname())     # ip地址
+        self.ip = "127.0.0.1"
         self.host1_port = 41123                                   # host1的端口
         self.host1_addr = (self.ip, self.host1_port)             # host1地址
         self.host2_port = 41897                                   # host2端口
