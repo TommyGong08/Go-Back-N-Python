@@ -48,7 +48,7 @@ class Config:
         self.lost_rate = 100    # 丢失率
         self.sw_size = 8        # 发送窗口大小
         self.init_seq_num = 1   # 起始序号
-        self.timeout = 1      # 超时时间
+        self.timeout = 2      # 超时时间
 
         self.pdu_to_send = self.init_seq_num        # 当前发送的pdu序号
         self.num_to_send = self.init_seq_num        # 当前发送的次数

@@ -27,8 +27,10 @@ def should_error():
     return True if random.randint(1, host2_config.error_rate) == host2_config.error_rate else False
 '''
 
+
 # 填充pdu队列
 def fill_pdu_q():
+    global time
     global host2_config
     global host2_send_file
     while True:
@@ -165,13 +167,7 @@ def receiver():
 
         elif pdu['is_ack'] == -2:  # 是ack帧则接受
             last_time = time.time()
-            try:
-                # ack = host1_socket.recvfrom(1024)[0]
-                ack = pdu['data']
-            except socket.timeout:  # 超时重发
-                print("resend")
-                threading.Thread(name='resend', target=resend).start()
-                continue
+            ack = pdu['data']
             # ack = pickle.loads(ack)
             lock.acquire()
             host2_config.acked_num = ack  # 修改已收到的ack
